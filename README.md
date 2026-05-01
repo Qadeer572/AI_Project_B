@@ -13,10 +13,15 @@ This project implements an AI-driven hospital surgery scheduling system that man
 ## Project Structure
 
 
-Assignment1_GroupNumber_MemberNames/
+Assignment1_Qadeer Raza_Abdullah Tariq_Malik Usman/
 │
-├── app.py           
-└── README.md       
+├── app.py
+├── train_model.py
+├── search_Algorithm.py
+├── emergency_model.pkl
+├── i233059_i233011_i233020_A02.py
+├── requirements.txt
+└── README.md     
 
 > All A\* search logic is embedded inside `app.py` so only one file is needed to run the full system.
 
