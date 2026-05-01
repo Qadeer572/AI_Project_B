@@ -57,6 +57,7 @@ The sidebar has **3 steps** to follow in order:
 **Step 1 — Hospital Setup**
 
 Set the number of operating rooms (1–6) and working hours per day (4–24). The system adapts everything to whatever you configure here.
+<img width="291" height="575" alt="image" src="https://github.com/user-attachments/assets/1b483573-401a-404b-b78f-b6fc46268ee6" />
 
 
 **Step 2 — Add Elective Surgeries**
