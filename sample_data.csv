@@ -1,0 +1,19 @@
+surgery_id,name,duration,urgency,surgeon,equipment,requires_icu,start_slot,room
+S1,Hernia Repair,2,1,Dr. Zaid,scalpel,FALSE,0,Room 1
+S2,Gallbladder,3,2,Dr. Sara,cauterizer,TRUE,0,Room 2
+S3,Knee Surgery,4,1,Dr. Khan,drill,FALSE,0,Room 3
+S4,ENT Procedure,2,1,Dr. Ahmed,camera,FALSE,0,Room 4
+S5,Neuro Consult,3,2,Dr. Baig,ecg_monitor,TRUE,0,Room 5
+S6,Thoracic Surg,5,2,Dr. Raza,ventilator,TRUE,0,Room 6
+S7,Skin Graft,2,1,Dr. Zaid,laser,FALSE,3,Room 1
+S8,Heart Valve,6,2,Dr. Sara,ecg_monitor,TRUE,4,Room 2
+S9,Bone Fixation,3,1,Dr. Khan,xray,FALSE,5,Room 3
+S10,Eye Surgery,2,1,Dr. Ahmed,laser,FALSE,3,Room 4
+S11,Appendectomy,3,2,Dr. Baig,scalpel,FALSE,4,Room 5
+S12,Hip Replace,4,1,Dr. Raza,drill,TRUE,6,Room 6
+S13,Dental Work,1,1,Dr. Zaid,drill,FALSE,6,Room 1
+S14,Spinal Fusion,5,2,Dr. Ahmed,xray,TRUE,6,Room 4
+S15,Vascular Rehab,3,1,Dr. Baig,ecg_monitor,FALSE,8,Room 5
+E1,Trauma Surgery,2,3,Dr. Nadia,ventilator,TRUE,11,Room 6
+E2,Cardiac Arrest,3,3,Dr. Malik,ecg_monitor,TRUE,10,Room 2
+E3,Internal Bleeding,2,3,Dr. Nadia,scalpel,FALSE,8,Room 1

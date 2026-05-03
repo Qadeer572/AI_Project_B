@@ -281,6 +281,12 @@ def is_valid_schedule(schedule, surgeries_dict, rooms,
         if surgery is None:
             return False
 
+        # ── Fix 1: Guard against rooms that no longer exist in the room list ──
+        # Prevents KeyError crash when the user reduces the room count after
+        # surgeries have already been added to a now-removed room.
+        if room not in room_slots:
+            return False
+
         end_slot = start_slot + surgery.duration
 
         # ── Constraint 1: Working Hours ───────────────────────
@@ -438,9 +444,13 @@ def get_neighbors(state, surgeries_dict, rooms, total_slots,
 
 def astar_search(initial_schedule, surgeries_dict, rooms, total_slots,
                  emergency_surgery, emergency_probability=0.0,
-                 num_icu_beds=999):
+                 num_icu_beds=999, max_iterations=50000):
 
-    logs        = []
+    MAX_TREE_NODES = 25          # cap nodes captured for tree visualisation
+    logs             = []
+    tree_nodes       = []        # captured explored nodes for tree drawing
+    state_id_to_idx  = {}        # id(ScheduleState) -> index in tree_nodes
+
     start_state = ScheduleState(dict(initial_schedule), g_cost=0.0)
     start_state.h_cost = heuristic(initial_schedule, surgeries_dict,
                                     emergency_probability)
@@ -454,12 +464,10 @@ def astar_search(initial_schedule, surgeries_dict, rooms, total_slots,
     while open_list:
         iteration += 1
 
-        # Safety termination cap (as documented in A2 methodology).
-        # Prevents runaway search in pathological cases beyond project scope.
-        if iteration > 50000:
-            return None, logs
+        if iteration > max_iterations:
+            return None, logs, tree_nodes
 
-        current    = heapq.heappop(open_list)
+        current = heapq.heappop(open_list)
 
         logs.append({
             "Iteration" : iteration,
@@ -474,10 +482,41 @@ def astar_search(initial_schedule, surgeries_dict, rooms, total_slots,
             continue
         closed_list.add(schedule_sig)
 
-        if (emergency_surgery.surgery_id in current.schedule and
+        # ── Capture node for tree visualisation (limited to MAX_TREE_NODES) ──
+        if len(tree_nodes) < MAX_TREE_NODES:
+            parent_idx = state_id_to_idx.get(id(current.parent), -1)
+            node_idx   = len(tree_nodes)
+            state_id_to_idx[id(current)] = node_idx
+            is_goal_node = (
+                emergency_surgery.surgery_id in current.schedule and
                 is_valid_schedule(current.schedule, surgeries_dict,
-                                  rooms, total_slots, num_icu_beds)):
-            return current, logs
+                                  rooms, total_slots, num_icu_beds)
+            )
+            tree_nodes.append({
+                "node_id"   : node_idx,
+                "schedule"  : dict(current.schedule),
+                "g"         : round(current.g_cost, 2),
+                "h"         : round(current.h_cost, 2),
+                "f"         : round(current.f_cost, 2),
+                "action"    : current.action,
+                "parent_id" : parent_idx,
+                "is_goal"   : is_goal_node,
+            })
+
+        is_goal = (
+            emergency_surgery.surgery_id in current.schedule and
+            is_valid_schedule(current.schedule, surgeries_dict,
+                              rooms, total_slots, num_icu_beds)
+        )
+        if is_goal:
+            # Mark the path nodes in tree_nodes by tracing parent chain
+            path_state = current
+            while path_state is not None:
+                idx = state_id_to_idx.get(id(path_state))
+                if idx is not None and idx < len(tree_nodes):
+                    tree_nodes[idx]["on_path"] = True
+                path_state = path_state.parent
+            return current, logs, tree_nodes
 
         for neighbor in get_neighbors(current, surgeries_dict, rooms,
                                        total_slots, emergency_surgery,
@@ -489,7 +528,7 @@ def astar_search(initial_schedule, surgeries_dict, rooms, total_slots,
                 neighbor.f_cost = neighbor.g_cost + neighbor.h_cost
                 heapq.heappush(open_list, neighbor)
 
-    return None, logs
+    return None, logs, tree_nodes
 
 
 def trace_path(goal_state):
@@ -591,14 +630,17 @@ DEFAULTS = {
     "emergency_ran"       : False,
     "total_cost"          : 0.0,
     "reschedule_count"    : 0,
-    "saved_rooms"         : ["Room 1", "Room 2", "Room 3"],
-    "saved_slots"         : 16,
-    "saved_icu_beds"      : 2,
-    "surgery_counter"     : 1,
-    "emergency_counter"   : 1,   # tracks E1, E2, E3 ... independently
-    "ml_probability"      : None,
-    "ml_risk_label"       : None,
-    "ml_risk_class"       : None,
+    "saved_rooms"              : ["Room 1", "Room 2", "Room 3"],
+    "saved_slots"              : 16,
+    "saved_icu_beds"           : 2,
+    "surgery_counter"          : 1,
+    "emergency_counter"        : 1,   # tracks E1, E2, E3 ... independently
+    "ml_probability"           : None,
+    "ml_risk_label"            : None,
+    "ml_risk_class"            : None,
+    "pre_emergency_schedule"   : {},
+    "pre_emergency_sdict"      : {},
+    "astar_tree"               : [],   # captured tree nodes for visualisation
 }
 
 for key, default in DEFAULTS.items():
@@ -637,14 +679,39 @@ sb.divider()
 # ── Step 1: Hospital Setup ────────────────────────────────────
 sb.markdown("### 🏨 Step 1 — Hospital Setup")
 
+# Always allow changing setup.
+# Fix 1 (KeyError guard in is_valid_schedule) prevents crashes if rooms
+# are reduced after surgeries are added — the validator returns False safely.
+# A soft warning is shown when surgeries already exist so the user knows
+# that existing surgeries in removed rooms will fail constraint checks.
+_saved_rooms_count = len(st.session_state.saved_rooms) if st.session_state.saved_rooms else 3
+_saved_slots       = st.session_state.saved_slots       if st.session_state.saved_slots  else 16
+_saved_icu         = st.session_state.saved_icu_beds    if st.session_state.saved_icu_beds else 2
+
 num_rooms   = sb.number_input("Number of Operating Rooms",
-                               min_value=1, max_value=6, value=3, step=1)
+                               min_value=1, max_value=6,
+                               value=int(_saved_rooms_count), step=1)
 total_slots = sb.number_input("Working Hours per Day",
-                               min_value=4, max_value=24, value=16, step=1)
+                               min_value=4, max_value=24,
+                               value=int(_saved_slots), step=1)
 num_icu     = sb.number_input(
-    "Number of ICU Beds", min_value=1, max_value=10, value=2, step=1,
+    "Number of ICU Beds", min_value=1, max_value=10,
+    value=int(_saved_icu), step=1,
     help="Max number of ICU-requiring surgeries allowed to run simultaneously"
 )
+
+# Soft warning only — does not block the user
+if st.session_state.surgeries_dict:
+    _prev_rooms = st.session_state.saved_rooms
+    _new_rooms  = [f"Room {i+1}" for i in range(int(num_rooms))]
+    _removed    = [r for r in _prev_rooms if r not in _new_rooms]
+    if _removed or int(total_slots) < int(_saved_slots) or int(num_icu) < int(_saved_icu):
+        sb.warning(
+            "⚠️ Setup changed after surgeries were added. "
+            "Any existing surgery that no longer fits the new configuration "
+            "will be rejected by the constraint validator. "
+            "Use **Reset** to start fresh if needed."
+        )
 
 rooms       = [f"Room {i+1}" for i in range(int(num_rooms))]
 slot_labels = {i: f"{8+i}:00" for i in range(int(total_slots) + 1)}
@@ -690,30 +757,131 @@ if add_btn:
         sid     = f"S{st.session_state.surgery_counter}"
         urgency = 1 if s_urgency == "Elective" else 2
 
-        candidate_surgery  = Surgery(
-            surgery_id=sid, name=s_name.strip(), duration=int(s_duration),
-            urgency=urgency, surgeon=s_surgeon.strip(),
-            equipment=s_equip, requires_icu=s_icu
-        )
-        candidate_schedule = {**st.session_state.schedule,       sid: (s_room, int(s_slot))}
-        candidate_dict     = {**st.session_state.surgeries_dict, sid: candidate_surgery}
-
-        if is_valid_schedule(candidate_schedule, candidate_dict,
-                             rooms, int(total_slots), int(num_icu)):
-            st.session_state.surgeries_dict[sid] = candidate_surgery
-            st.session_state.schedule[sid]        = (s_room, int(s_slot))
-            st.session_state.saved_rooms          = rooms
-            st.session_state.saved_slots          = int(total_slots)
-            st.session_state.saved_icu_beds       = int(num_icu)
-            st.session_state.surgery_counter     += 1
-            st.session_state.ml_probability       = None
-            sb.success(f"✅ {s_name.strip()} added as {sid}")
-        else:
+        # ── Fix 2: Proactive overflow check before full validation ────────────
+        # Catches start_slot + duration > total_slots early and gives a clear,
+        # specific message instead of the generic constraint-violation error.
+        _end_slot = int(s_slot) + int(s_duration)
+        if _end_slot > int(total_slots):
             sb.error(
-                "⚠️ Constraint violation — check: room conflict, "
-                "surgeon conflict, equipment conflict, ICU availability, "
-                "or working hours limit."
+                f"⚠️ Working-hours overflow: surgery starts at slot {int(s_slot)} "
+                f"({slot_labels.get(int(s_slot), '')}) and lasts {int(s_duration)} hr(s), "
+                f"finishing at slot {_end_slot} which exceeds the "
+                f"{int(total_slots)}-hour day limit "
+                f"(latest finish: {slot_labels.get(int(total_slots), '')}). "
+                "Reduce duration or choose an earlier start slot."
             )
+        else:
+            candidate_surgery  = Surgery(
+                surgery_id=sid, name=s_name.strip(), duration=int(s_duration),
+                urgency=urgency, surgeon=s_surgeon.strip(),
+                equipment=s_equip, requires_icu=s_icu
+            )
+            candidate_schedule = {**st.session_state.schedule,       sid: (s_room, int(s_slot))}
+            candidate_dict     = {**st.session_state.surgeries_dict, sid: candidate_surgery}
+
+            if is_valid_schedule(candidate_schedule, candidate_dict,
+                                 rooms, int(total_slots), int(num_icu)):
+                st.session_state.surgeries_dict[sid] = candidate_surgery
+                st.session_state.schedule[sid]        = (s_room, int(s_slot))
+                st.session_state.saved_rooms          = rooms
+                st.session_state.saved_slots          = int(total_slots)
+                st.session_state.saved_icu_beds       = int(num_icu)
+                st.session_state.surgery_counter     += 1
+                st.session_state.ml_probability       = None
+                sb.success(f"✅ {s_name.strip()} added as {sid}")
+            else:
+                # ── Fix 4: Specific constraint failure messages ───────────────
+                # Identify exactly which constraint was violated instead of
+                # showing one generic error for all five constraints.
+                _sched_existing = dict(st.session_state.schedule)
+                _dict_existing  = dict(st.session_state.surgeries_dict)
+
+                # Check room conflict
+                _room_conflict = False
+                for _oid, (_or, _os) in _sched_existing.items():
+                    _o = _dict_existing.get(_oid)
+                    if _o and _or == s_room:
+                        _overlap = range(
+                            max(int(s_slot), _os),
+                            min(int(s_slot) + int(s_duration), _os + _o.duration)
+                        )
+                        if len(_overlap) > 0:
+                            _room_conflict = True
+                            break
+
+                # Check surgeon conflict
+                _surgeon_conflict = False
+                for _oid, (_or, _os) in _sched_existing.items():
+                    _o = _dict_existing.get(_oid)
+                    if _o and _o.surgeon.strip().lower() == s_surgeon.strip().lower():
+                        _overlap = range(
+                            max(int(s_slot), _os),
+                            min(int(s_slot) + int(s_duration), _os + _o.duration)
+                        )
+                        if len(_overlap) > 0:
+                            _surgeon_conflict = True
+                            break
+
+                # Check equipment conflict
+                _equip_conflict = False
+                if s_equip:
+                    for _oid, (_or, _os) in _sched_existing.items():
+                        _o = _dict_existing.get(_oid)
+                        if _o and _or != s_room:
+                            _shared = set(s_equip) & set(_o.equipment)
+                            if _shared:
+                                _overlap = range(
+                                    max(int(s_slot), _os),
+                                    min(int(s_slot) + int(s_duration), _os + _o.duration)
+                                )
+                                if len(_overlap) > 0:
+                                    _equip_conflict = True
+                                    break
+
+                # Check ICU conflict
+                _icu_conflict = False
+                if s_icu:
+                    _icu_running = sum(
+                        1 for _oid, (_or, _os) in _sched_existing.items()
+                        if _dict_existing.get(_oid) and
+                           _dict_existing[_oid].requires_icu and
+                           len(range(max(int(s_slot), _os),
+                                    min(int(s_slot) + int(s_duration),
+                                        _os + _dict_existing[_oid].duration))) > 0
+                    )
+                    if _icu_running >= int(num_icu):
+                        _icu_conflict = True
+
+                if _room_conflict:
+                    sb.error(
+                        f"❌ Room conflict: {s_room} is already occupied during "
+                        f"{slot_labels.get(int(s_slot), f'slot {s_slot}')} – "
+                        f"{slot_labels.get(_end_slot, f'slot {_end_slot}')}. "
+                        "Choose a different room or time slot."
+                    )
+                elif _surgeon_conflict:
+                    sb.error(
+                        f"❌ Surgeon conflict: {s_surgeon.strip()} is already "
+                        "operating during this time window. "
+                        "Assign a different surgeon or adjust the time slot."
+                    )
+                elif _equip_conflict:
+                    sb.error(
+                        f"❌ Equipment conflict: one or more items in "
+                        f"{s_equip} are already in use in a different room "
+                        "during this time window."
+                    )
+                elif _icu_conflict:
+                    sb.error(
+                        f"❌ ICU unavailable: all {int(num_icu)} ICU bed(s) are "
+                        "occupied during this time window. "
+                        "Add more ICU beds or choose a non-overlapping time slot."
+                    )
+                else:
+                    sb.error(
+                        "⚠️ Constraint violation detected. "
+                        "Check working hours, room assignments, and equipment."
+                    )
 
 if st.session_state.surgeries_dict:
     sb.markdown("**Surgeries added:**")
@@ -726,7 +894,6 @@ if st.session_state.surgeries_dict:
         )
 
 sb.divider()
-
 # ── Step 3: Inject Emergency ──────────────────────────────────
 sb.markdown("### 🚨 Step 3 — Inject Emergency Surgery")
 
@@ -946,7 +1113,7 @@ if run_btn:
                    if st.session_state.ml_probability is not None else 0.5)
 
         with st.spinner(f"⏳ A* placing {em_id} — checking all 5 constraints..."):
-            goal, logs = astar_search(
+            goal, logs, tree_nodes = astar_search(
                 initial_schedule      = st.session_state.schedule,
                 surgeries_dict        = surgeries_with_em,
                 rooms                 = used_rooms,
@@ -957,17 +1124,19 @@ if run_btn:
             )
 
         if goal:
-            # commit the rescheduled plan as the new baseline schedule
-            # so the next emergency builds on top of this one
+            st.session_state.pre_emergency_schedule = dict(st.session_state.schedule)
+            st.session_state.pre_emergency_sdict    = copy.deepcopy(st.session_state.surgeries_dict)
+
             st.session_state.schedule         = goal.schedule
             st.session_state.surgeries_dict   = surgeries_with_em
             st.session_state.goal_state       = goal
             st.session_state.astar_logs       = logs
+            st.session_state.astar_tree       = tree_nodes      # ← save tree
             st.session_state.path_steps       = trace_path(goal)
             st.session_state.emergency_ran    = True
             st.session_state.total_cost      += goal.g_cost
             st.session_state.reschedule_count += 1
-            st.session_state.emergency_counter += 1   # next emergency gets E2, E3 ...
+            st.session_state.emergency_counter += 1
         else:
             st.error(
                 f"❌ A* could not place {em_id}. "
@@ -1010,16 +1179,24 @@ with c4:
     </div>""", unsafe_allow_html=True)
 
 with c5:
-    # session_state.schedule is always the committed truth —
-    # it is updated immediately after every successful A* run
-    icu_count = sum(
-        1 for sid in st.session_state.schedule
-        if st.session_state.surgeries_dict.get(sid) and
-           st.session_state.surgeries_dict[sid].requires_icu
-    )
+    # Compute PEAK concurrent ICU usage — i.e. the maximum number of
+    # ICU-requiring surgeries running at the same time in any single slot.
+    # This is the correct figure to compare against num_icu_beds.
+    # (Total ICU surgeries across all time slots can legitimately exceed
+    #  num_icu_beds as long as they don't overlap.)
+    _icu_slots: dict = {}
+    for _sid in st.session_state.schedule:
+        _s = st.session_state.surgeries_dict.get(_sid)
+        if _s and _s.requires_icu:
+            _sr, _ss = st.session_state.schedule[_sid]
+            for _slot in range(_ss, _ss + _s.duration):
+                _icu_slots[_slot] = _icu_slots.get(_slot, 0) + 1
+    peak_icu = max(_icu_slots.values()) if _icu_slots else 0
+    icu_beds = st.session_state.saved_icu_beds
+    icu_color = "color:#D0021B;" if peak_icu > icu_beds else ""
     st.markdown(f"""<div class="metric-card">
-        <div class="metric-value">{icu_count} / {st.session_state.saved_icu_beds}</div>
-        <div class="metric-label">ICU Beds Used</div>
+        <div class="metric-value" style="{icu_color}">{peak_icu} / {icu_beds}</div>
+        <div class="metric-label">Peak Concurrent ICU Beds</div>
     </div>""", unsafe_allow_html=True)
 
 with c6:
@@ -1099,9 +1276,21 @@ if st.session_state.schedule:
                 use_container_width=True
             )
         with tab2:
+            # Use the saved pre-emergency snapshot — NOT st.session_state.schedule
+            # which has already been overwritten with the A* result.
+            _orig_schedule = (
+                st.session_state.pre_emergency_schedule
+                if st.session_state.emergency_ran
+                else st.session_state.schedule
+            )
+            _orig_sdict = (
+                st.session_state.pre_emergency_sdict
+                if st.session_state.emergency_ran
+                else st.session_state.surgeries_dict
+            )
             st.plotly_chart(
-                build_gantt(st.session_state.schedule,
-                            st.session_state.surgeries_dict,
+                build_gantt(_orig_schedule,
+                            _orig_sdict,
                             used_rooms, used_slots,
                             "Original Schedule (Before Emergency)"),
                 use_container_width=True
@@ -1123,25 +1312,25 @@ if st.session_state.schedule:
     st.markdown("<br>", unsafe_allow_html=True)
 
 
-# =============================================================
+ # =============================================================
 # A* TRANSPARENCY LOG
 # =============================================================
-
+ 
 if st.session_state.astar_logs:
     st.markdown('<p class="section-title">🔍 A* Search — Transparency Log</p>',
                 unsafe_allow_html=True)
-
+ 
     with st.expander("View A* iteration log  (g, h, f values per step)"):
         st.dataframe(
             pd.DataFrame(st.session_state.astar_logs),
             use_container_width=True, hide_index=True
         )
-
+ 
     st.markdown("<br>", unsafe_allow_html=True)
-
+ 
     st.markdown('<p class="section-title">🪜 Rescheduling Path — Step by Step</p>',
                 unsafe_allow_html=True)
-
+ 
     with st.expander("View each action A* took to reach the final schedule"):
         for i, state in enumerate(st.session_state.path_steps):
             if state.action:
@@ -1152,9 +1341,8 @@ if st.session_state.astar_logs:
                     h = {state.h_cost:.2f} &nbsp;&nbsp;
                     f = {state.f_cost:.2f}
                 </div>""", unsafe_allow_html=True)
-
+ 
     st.markdown("<br>", unsafe_allow_html=True)
-
 
 # =============================================================
 # FOOTER
