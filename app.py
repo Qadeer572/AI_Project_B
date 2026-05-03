@@ -1345,7 +1345,7 @@ if st.session_state.astar_logs:
     st.markdown("<br>", unsafe_allow_html=True)
 
 # =============================================================
-# FOOTER
+# FOOTER   Qadeer Raza 
 # =============================================================
 
 st.divider()

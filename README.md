@@ -13,7 +13,7 @@ This project implements an AI-driven hospital surgery scheduling system that man
 ## Project Structure
 
 
-Assignment1_GroupNumber_MemberNames/
+Assignment1_Qadeer Raza_Abdullah Tariq_Malik Usman/
 │
 ├── app.py
 ├── train_model.py
@@ -21,8 +21,12 @@ Assignment1_GroupNumber_MemberNames/
 ├── emergency_model.pkl
 ├── i233059_i233011_i233020_A02.py
 ├── requirements.txt
+<<<<<<< HEAD
 └── README.md
 
+=======
+└── README.md     
+>>>>>>> 39fd21be354cd5a2693291cd16de69e0b23f73ea
 
 > All A\* search logic is embedded inside `app.py` so only one file is needed to run the full system.
 
@@ -63,6 +67,7 @@ The sidebar has **3 steps** to follow in order:
 **Step 1 — Hospital Setup**
 
 Set the number of operating rooms (1–6) and working hours per day (4–24). The system adapts everything to whatever you configure here.
+<img width="291" height="575" alt="image" src="https://github.com/user-attachments/assets/1b483573-401a-404b-b78f-b6fc46268ee6" />
 
 
 **Step 2 — Add Elective Surgeries**
