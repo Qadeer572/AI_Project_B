@@ -8,7 +8,7 @@
 
 This project implements an AI-driven hospital surgery scheduling system that manages elective surgery planning and dynamically reschedules when emergency cases arrive. The core of Assignment 1 Part B is the **A\* Search Algorithm**, which finds the optimal rescheduling path with minimum cost and disruption when an emergency surgery is injected into an existing schedule. The entire system runs through an interactive **Streamlit web dashboard** — no console interaction needed.
 
-
+Live Demo:https://aiprojectb-ppq3ehzq87tbqcmupj9lzp.streamlit.app/
 
 ## Project Structure
 
