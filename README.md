@@ -135,7 +135,7 @@ After clicking **Run A\* Rescheduling**, the dashboard shows:
 
 **Gantt Chart — Two Tabs**
 - *After Rescheduling (A\* Output)* — shows the updated plan with Emergency Trauma placed in Room 3 at 08:00 without disturbing any existing surgery
-- *Original Schedule* — shows the plan before the emergency arrived
+- *Original Schedule* — -- shows the plan before the emergency arrived
 
 **Schedule Table**
 
